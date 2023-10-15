@@ -13,15 +13,14 @@ from import_matlab_data import import_matlab_dataset
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter1d
-
-"DOUBLE CHECK EVERYTHING TO MAKE SURE IT's PLAYING NICE WITH MUTABLE VALUE BEHAVIOR"
+from rmCh_module import rmCoincidentCh, rmLowFR
 
 def getTrajDf(dataset):
     #Import data
     data = import_matlab_dataset(dataset)
     #Function input parameters
-    startTime = -40/1000
-    stopTime = 200/1000
+    startTime = -200/1000
+    stopTime = 2000/1000
     binWidth = 20/1000
     binnedSpikes = data['binnedSpikes'][0,0]
     stimInfo = data['stimInfo'][0,0]
@@ -37,10 +36,14 @@ def getTrajDf(dataset):
     #Convert to Hz
     binCounts = np.divide(binCounts,binWidth)
     
-    #Cut binCounts rows that don't contain spikes
-    hasSpikesMask = np.any(binCounts != 0,axis=1)
-    binCounts = binCounts[hasSpikesMask,:]
-    numCh = np.sum(hasSpikesMask)
+    #Remove lowFR channels (<1 Hz)
+    binCounts = rmLowFR(binCounts)
+    
+    #Remove coincident channels
+    binCounts = rmCoincidentCh(binCounts)
+    
+    #Get numCh
+    numCh = binCounts.shape[0]
     
     #Smooth binCounts with a Gaussian
     for ch in range(numCh):
@@ -117,7 +120,6 @@ def getTrajDf(dataset):
         numTrials = numTrials + 1
     
     #Preallocate numpy arrays
-    #
     noteId = np.full(numTrials,np.nan)
     noteStartTime = np.full(numTrials,np.nan)
     noteStopTime = np.full(numTrials,np.nan)
@@ -177,15 +179,15 @@ def getTrajDf(dataset):
     numBins = int(np.ceil((stopTime-startTime)/binWidth))
     
     #Preallocate trajDf columns (to total num trials for each condition)
-    stimCh = np.full((numCond,numTrials),np.nan)
-    intNote = np.full((numCond,numTrials),np.nan)
+    stimCh = np.full(numCond,np.nan)
+    intNote = np.full(numCond,np.nan)
     noteStartTime = np.full((numCond,numTrials),np.nan)
     noteStopTime = np.full((numCond,numTrials),np.nan)
     stimStartTime = np.full((numCond,numTrials),np.nan)
     stimStopTime = np.full((numCond,numTrials),np.nan)
     allBinFr = np.full((numCond,numTrials,numBins,numCh),np.nan)
     avgBinFr = np.full((numCond,numBins,numCh),np.nan)
-    noteTime = np.full((numTrials,2),np.nan)
+    time = np.full((numCond,numBins),np.nan)
     
     for cond in range(numCond): 
          #Get condDf
@@ -196,9 +198,9 @@ def getTrajDf(dataset):
          else:
              condDf = trialDf[(trialDf['noteId']==allCondDf.loc[cond,'noteId']) & (trialDf['stimCh']==allCondDf.loc[cond,'stimCh'])]
          numCondTrials = condDf.shape[0]
+         stimCh[cond] = condDf.iloc[0,condDf.columns.get_loc('stimCh')]
+         intNote[cond] = condDf.iloc[0,condDf.columns.get_loc('noteId')]
          for trial in range(numCondTrials):
-             stimCh[cond,trial] = condDf.iloc[trial,condDf.columns.get_loc('stimCh')]
-             intNote[cond,trial] = condDf.iloc[trial,condDf.columns.get_loc('noteId')]
              noteStartTime[cond,trial] = condDf.iloc[trial,condDf.columns.get_loc('noteStartTime')]
              noteStopTime[cond,trial] = condDf.iloc[trial,condDf.columns.get_loc('noteStopTime')]
              stimStartTime[cond,trial] = condDf.iloc[trial,condDf.columns.get_loc('stimStartTime')]
@@ -209,10 +211,10 @@ def getTrajDf(dataset):
              timeMask = (binTimes >= timeWindow[0]) & (binTimes < timeWindow[1])
              allBinFr[cond,trial,:,:] = np.transpose(binCounts[:,timeMask])
          avgBinFr[cond,:,:] = np.nanmean(allBinFr[cond,:,:,:],axis=0)
+         time[cond,:] = np.linspace(startTime,stopTime,numBins)
           
     # Clear pages of nans
     #for each condition, clear all blank trials
-    
     
     
     #Store in trajDf
@@ -223,7 +225,8 @@ def getTrajDf(dataset):
                           'noteStartTime':list(noteStartTime),
                           'noteStopTime':list(noteStopTime),
                           'allBinFr':list(allBinFr),
-                          'avgBinFr':list(avgBinFr)
+                          'avgBinFr':list(avgBinFr),
+                          'time':list(time)
                             })
     
     return trajDf
